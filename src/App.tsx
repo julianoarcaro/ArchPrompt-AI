@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   Camera, 
   Upload, 
@@ -28,6 +28,16 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { ContextInfo, PromptResult } from './types';
 import { generateArchitecturalPrompts } from './services/geminiService';
+import { auth, db } from './firebase';
+import { 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword, 
+  signInWithPopup, 
+  GoogleAuthProvider,
+  onAuthStateChanged,
+  signOut
+} from 'firebase/auth';
+import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
 
 const LANGUAGES = [
   { code: 'pt', name: 'Português', flag: '🇧🇷' },
@@ -295,6 +305,9 @@ export default function App() {
   const [password, setPassword] = useState('');
 
   const [loading, setLoading] = useState(false);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [isApproved, setIsApproved] = useState<boolean | null>(null);
   const [archImage, setArchImage] = useState<string | null>(null);
   const [lightImage, setLightImage] = useState<string | null>(null);
   const [context, setContext] = useState<ContextInfo>({
@@ -403,6 +416,88 @@ export default function App() {
     setResults([]);
   };
 
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      setCurrentUser(user);
+      if (user) {
+        // Listen to user document for approval status
+        const userRef = doc(db, 'users', user.uid);
+        
+        const unsubscribeDoc = onSnapshot(userRef, async (docSnap) => {
+          if (docSnap.exists()) {
+            setIsApproved(docSnap.data().isApproved === true);
+            setAuthLoading(false);
+            if (docSnap.data().isApproved === true) {
+              setStep(1);
+            }
+          } else {
+            // Create user document if it doesn't exist
+            try {
+              await setDoc(userRef, {
+                email: user.email,
+                isApproved: false,
+                createdAt: new Date().toISOString()
+              });
+              setIsApproved(false);
+            } catch (err: any) {
+              console.error("Error creating user doc", err);
+              // For security rules missing or errors, gracefully handle
+            } finally {
+              setAuthLoading(false);
+            }
+          }
+        }, (err) => {
+          console.error("Firestore error: ", err);
+          setAuthLoading(false);
+        });
+
+        return () => unsubscribeDoc();
+      } else {
+        setIsApproved(null);
+        setStep(0);
+        setAuthLoading(false);
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const handleEmailAuth = async (isLogin: boolean) => {
+    if (!email || !password) return;
+    setAuthLoading(true);
+    try {
+      if (isLogin) {
+        await signInWithEmailAndPassword(auth, email, password);
+      } else {
+        await createUserWithEmailAndPassword(auth, email, password);
+      }
+      // step update is handled inside onAuthStateChanged
+    } catch (error: any) {
+      console.error(error);
+      alert('Erro de Autenticação: ' + error.message + '\n\nCertifique-se de que o provedor de E-mail/Senha está ativado no painel do Firebase.');
+      setAuthLoading(false);
+    }
+  };
+
+  const handleGoogleAuth = async () => {
+    setAuthLoading(true);
+    try {
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(auth, provider);
+      // step update is handled inside onAuthStateChanged
+    } catch (error: any) {
+      console.error(error);
+      alert('Erro ao fazer login com o Google: ' + error.message);
+      setAuthLoading(false);
+    }
+  };
+
+  const logout = async () => {
+    await signOut(auth);
+    resetAll();
+    setStep(0);
+  };
+
   return (
     <div className="min-h-screen bg-[#0A0A0B] text-slate-200 font-sans selection:bg-orange-500/30" dir={language === 'ar' ? 'rtl' : 'ltr'}>
       {/* Header */}
@@ -415,6 +510,14 @@ export default function App() {
             <h1 className="font-bold text-xl tracking-tight text-white">{t.headerTitle} <span className="text-orange-500">{t.headerBadge}</span></h1>
           </div>
           <div className="flex items-center gap-4 text-xs font-mono text-slate-500 uppercase tracking-widest">
+            {currentUser && (
+               <button 
+                 onClick={logout}
+                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white font-sans normal-case border border-white/10 transition-colors"
+               >
+                 Sair
+               </button>
+            )}
             <span className="flex items-center gap-2">
               <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
               {t.systemOnline}
@@ -475,16 +578,33 @@ export default function App() {
               <div className="bg-white/5 backdrop-blur-3xl rounded-3xl p-8 border border-white/10 shadow-2xl relative overflow-hidden">
                 <div className="absolute inset-0 bg-gradient-to-br from-orange-500/10 to-transparent pointer-events-none" />
                 
-                <div className="relative z-10 space-y-8">
-                  <div className="text-center space-y-2">
-                    <div className="w-16 h-16 bg-orange-500 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-orange-500/20">
-                      <Sparkles className="w-8 h-8 text-black" />
+                {currentUser && isApproved === false ? (
+                  <div className="relative z-10 space-y-6 text-center py-8">
+                    <div className="w-16 h-16 bg-blue-500/10 rounded-2xl flex items-center justify-center mx-auto mb-6">
+                      <Lock className="w-8 h-8 text-blue-500" />
                     </div>
-                    <h2 className="text-3xl font-bold text-white tracking-tight">{t.loginTitle}</h2>
-                    <p className="text-slate-400 text-sm">{t.loginSubtitle}</p>
+                    <h2 className="text-2xl font-bold text-white tracking-tight">Acesso Pendente</h2>
+                    <p className="text-slate-400 text-sm">
+                      Sua conta (<span className="text-white">{currentUser.email}</span>) foi criada e aguarda liberação manual do administrador.
+                    </p>
+                    <button 
+                      onClick={logout}
+                      className="mt-6 w-full bg-white/5 hover:bg-white/10 border border-white/10 text-white font-bold py-3 rounded-xl transition-all"
+                    >
+                      Sair e tentar outra conta
+                    </button>
                   </div>
+                ) : (
+                  <div className="relative z-10 space-y-8">
+                    <div className="text-center space-y-2">
+                      <div className="w-16 h-16 bg-orange-500 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-orange-500/20">
+                        <Sparkles className="w-8 h-8 text-black" />
+                      </div>
+                      <h2 className="text-3xl font-bold text-white tracking-tight">{t.loginTitle}</h2>
+                      <p className="text-slate-400 text-sm">{t.loginSubtitle}</p>
+                    </div>
 
-                  <form onSubmit={(e) => { e.preventDefault(); setStep(1); }} className="space-y-4">
+                    <form onSubmit={(e) => { e.preventDefault(); handleEmailAuth(true); }} className="space-y-4">
                     <div className="space-y-2">
                       <label className="text-xs font-mono text-slate-500 uppercase">{t.email}</label>
                       <div className="relative">
@@ -513,15 +633,47 @@ export default function App() {
                       </div>
                     </div>
 
+                    <div className="flex gap-2 mt-4">
+                      <button 
+                        type="button"
+                        onClick={() => handleEmailAuth(false)}
+                        disabled={!email || !password || authLoading}
+                        className="w-full bg-white/5 hover:bg-white/10 border border-white/10 disabled:opacity-50 text-white font-medium py-4 rounded-xl flex items-center justify-center transition-all active:scale-[0.98]"
+                      >
+                        Criar Conta
+                      </button>
+                      <button 
+                        type="submit"
+                        disabled={!email || !password || authLoading}
+                        className="w-full bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-black font-bold py-4 rounded-xl flex items-center justify-center transition-all active:scale-[0.98]"
+                      >
+                        {authLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : t.enter}
+                      </button>
+                    </div>
+
+                    <div className="relative flex items-center py-2">
+                      <div className="flex-grow border-t border-white/10"></div>
+                      <span className="flex-shrink-0 mx-4 text-xs font-mono text-slate-500 uppercase">Ou</span>
+                      <div className="flex-grow border-t border-white/10"></div>
+                    </div>
+
                     <button 
-                      type="submit"
-                      disabled={!email || !password}
-                      className="w-full bg-orange-500 hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed text-black font-bold py-4 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-[0.98] mt-4"
+                      type="button"
+                      onClick={handleGoogleAuth}
+                      disabled={authLoading}
+                      className="w-full bg-white hover:bg-slate-100 disabled:opacity-50 text-black font-bold py-4 rounded-xl flex items-center justify-center gap-3 transition-all active:scale-[0.98]"
                     >
-                      {t.enter} <ChevronRight className="w-5 h-5" />
+                      <svg className="w-5 h-5" viewBox="0 0 24 24">
+                        <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                        <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                        <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+                        <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                      </svg>
+                      Entrar com Google
                     </button>
                   </form>
                 </div>
+                )}
               </div>
             </motion.div>
           )}
