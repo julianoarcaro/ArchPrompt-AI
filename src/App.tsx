@@ -29,9 +29,6 @@ import { motion, AnimatePresence } from 'motion/react';
 import { ContextInfo, PromptResult } from './types';
 import { generateArchitecturalPrompts } from './services/geminiService';
 
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
-import { auth } from './services/firebase';
-
 const LANGUAGES = [
   { code: 'pt', name: 'Português', flag: '🇧🇷' },
   { code: 'en', name: 'English', flag: '🇺🇸' },
@@ -319,26 +316,6 @@ export default function App() {
 
   const t = TRANSLATIONS[language];
 
-  const handleAuth = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email || !password) return;
-    try {
-      await signInWithEmailAndPassword(auth, email, password);
-      setStep(1);
-    } catch (err: any) {
-      if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential' || err.code === 'auth/invalid-login-credentials') {
-        try {
-          await createUserWithEmailAndPassword(auth, email, password);
-          setStep(1);
-        } catch (createErr: any) {
-          alert('Erro na autenticação: ' + createErr.message + '\n\nCertifique-se de que "Email/Password" está ativado no Firebase Console (Authentication > Sign-in method).');
-        }
-      } else {
-        alert('Erro na autenticação: ' + err.message);
-      }
-    }
-  };
-
   const processFile = (file: File, type: 'arch' | 'light') => {
     const reader = new FileReader();
     reader.onloadend = () => {
@@ -507,7 +484,7 @@ export default function App() {
                     <p className="text-slate-400 text-sm">{t.loginSubtitle}</p>
                   </div>
 
-                  <form onSubmit={handleAuth} className="space-y-4">
+                  <form onSubmit={(e) => { e.preventDefault(); setStep(1); }} className="space-y-4">
                     <div className="space-y-2">
                       <label className="text-xs font-mono text-slate-500 uppercase">{t.email}</label>
                       <div className="relative">

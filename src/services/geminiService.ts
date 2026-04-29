@@ -6,8 +6,7 @@ const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY || proc
 export async function generateArchitecturalPrompts(
   archPrintBase64: string,
   lightingRefBase64: string,
-  context: ContextInfo,
-  retries = 3
+  context: ContextInfo
 ): Promise<GenerationResult> {
   const systemInstruction = `
 Você é um sistema de elite para geração de prompts arquitetônicos, composto por 7 agentes especializados trabalhando de forma hierárquica e colaborativa para atingir o NÍVEL MÁXIMO de fotorrealismo e FIDELIDADE ao projeto original.
@@ -64,69 +63,54 @@ INSTRUÇÕES:
 4. Gere 4 prompts finais em inglês: HERO, CLOSE, ALTERNATIVE ANGLE, MOMENT.
 `;
 
-  let attempt = 0;
-  while (attempt < retries) {
-    try {
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: [
+  const response = await ai.models.generateContent({
+    model: "gemini-3-flash-preview",
+    contents: [
+      {
+        parts: [
+          { text: systemInstruction },
+          { text: promptText },
           {
-            parts: [
-              { text: systemInstruction },
-              { text: promptText },
-              {
-                inlineData: {
-                  mimeType: "image/png",
-                  data: archPrintBase64.split(",")[1] || archPrintBase64,
-                },
-              },
-              {
-                inlineData: {
-                  mimeType: "image/png",
-                  data: lightingRefBase64.split(",")[1] || lightingRefBase64,
-                },
-              },
-            ],
+            inlineData: {
+              mimeType: "image/png",
+              data: archPrintBase64.split(",")[1] || archPrintBase64,
+            },
+          },
+          {
+            inlineData: {
+              mimeType: "image/png",
+              data: lightingRefBase64.split(",")[1] || lightingRefBase64,
+            },
           },
         ],
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              prompts: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    title: { type: Type.STRING },
-                    prompt: { type: Type.STRING },
-                    negativePrompt: { type: Type.STRING },
-                  },
-                  required: ["title", "prompt", "negativePrompt"],
-                },
+      },
+    ],
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          prompts: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                title: { type: Type.STRING },
+                prompt: { type: Type.STRING },
+                negativePrompt: { type: Type.STRING },
               },
-              lockedMaterials: {
-                type: Type.STRING,
-                description: "The generated DNA definition of the materials (M01, M02...). Required to be populated by the MATERIAL CONSISTENCY CONTROLLER so they can be reused."
-              }
+              required: ["title", "prompt", "negativePrompt"],
             },
-            required: ["prompts", "lockedMaterials"],
           },
+          lockedMaterials: {
+            type: Type.STRING,
+            description: "The generated DNA definition of the materials (M01, M02...). Required to be populated by the MATERIAL CONSISTENCY CONTROLLER so they can be reused."
+          }
         },
-      });
+        required: ["prompts", "lockedMaterials"],
+      },
+    },
+  });
 
-      return JSON.parse(response.text || "{}");
-    } catch (error: any) {
-      attempt++;
-      console.error(`Attempt ${attempt} failed:`, error);
-      if (attempt >= retries) {
-        throw error;
-      }
-      // Exponential backoff
-      await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, attempt)));
-    }
-  }
-  
-  throw new Error("Failed to generate prompts after multiple attempts");
+  return JSON.parse(response.text || "{}");
 }

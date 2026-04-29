@@ -1,6 +1,5 @@
 {
-  "name": "ArchPrompt-AI",
+  "name": "ArchPrompt AI",
   "description": "Sistema especializado de geração de prompts arquitetônicos utilizando 7 agentes inteligentes para análise de cena e refinamento visual.",
-  "requestFramePermissions": [],
-  "majorCapabilities": []
+  "requestFramePermissions": []
 }
